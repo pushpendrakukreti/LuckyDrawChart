@@ -1,0 +1,833 @@
+CallbackReg( oSettings, 'aoRowCreatedCallback', oInit.fnCreatedRow,        'user' );
+			_fnCallbackReg( oSettings, 'aoHeaderCallback',     oInit.fnHeaderCallback,    'user' );
+			_fnCallbackReg( oSettings, 'aoFooterCallback',     oInit.fnFooterCallback,    'user' );
+			_fnCallbackReg( oSettings, 'aoInitComplete',       oInit.fnInitComplete,      'user' );
+			_fnCallbackReg( oSettings, 'aoPreDrawCallback',    oInit.fnPreDrawCallback,   'user' );
+			
+			if ( oSettings.oFeatures.bServerSide && oSettings.oFeatures.bSort &&
+				   oSettings.oFeatures.bSortClasses )
+			{
+				/* Enable sort classes for server-side processing. Safe to do it here, since server-side
+				 * processing must be enabled by the developer
+				 */
+				_fnCallbackReg( oSettings, 'aoDrawCallback', _fnSortingClasses, 'server_side_sort_classes' );
+			}
+			else if ( oSettings.oFeatures.bDeferRender )
+			{
+				_fnCallbackReg( oSettings, 'aoDrawCallback', _fnSortingClasses, 'defer_sort_classes' );
+			}
+			
+			if ( oInit.bJQueryUI )
+			{
+				/* Use the JUI classes object for display. You could clone the oStdClasses object if 
+				 * you want to have multiple tables with multiple independent classes 
+				 */
+				$.extend( oSettings.oClasses, DataTable.ext.oJUIClasses );
+				
+				if ( oInit.sDom === DataTable.defaults.sDom && DataTable.defaults.sDom === "lfrtip" )
+				{
+					/* Set the DOM to use a layout suitable for jQuery UI's theming */
+					oSettings.sDom = '<"H"lfr>t<"F"ip>';
+				}
+			}
+			else
+			{
+				$.extend( oSettings.oClasses, DataTable.ext.oStdClasses );
+			}
+			$(this).addClass( oSettings.oClasses.sTable );
+			
+			/* Calculate the scroll bar width and cache it for use later on */
+			if ( oSettings.oScroll.sX !== "" || oSettings.oScroll.sY !== "" )
+			{
+				oSettings.oScroll.iBarWidth = _fnScrollBarWidth();
+			}
+			
+			if ( oSettings.iInitDisplayStart === undefined )
+			{
+				/* Display start point, taking into account the save saving */
+				oSettings.iInitDisplayStart = oInit.iDisplayStart;
+				oSettings._iDisplayStart = oInit.iDisplayStart;
+			}
+			
+			/* Must be done after everything which can be overridden by a cookie! */
+			if ( oInit.bStateSave )
+			{
+				oSettings.oFeatures.bStateSave = true;
+				_fnLoadState( oSettings, oInit );
+				_fnCallbackReg( oSettings, 'aoDrawCallback', _fnSaveState, 'state_save' );
+			}
+			
+			if ( oInit.iDeferLoading !== null )
+			{
+				oSettings.bDeferLoading = true;
+				var tmp = $.isArray( oInit.iDeferLoading );
+				oSettings._iRecordsDisplay = tmp ? oInit.iDeferLoading[0] : oInit.iDeferLoading;
+				oSettings._iRecordsTotal = tmp ? oInit.iDeferLoading[1] : oInit.iDeferLoading;
+			}
+			
+			if ( oInit.aaData !== null )
+			{
+				bUsePassedData = true;
+			}
+			
+			/* Language definitions */
+			if ( oInit.oLanguage.sUrl !== "" )
+			{
+				/* Get the language definitions from a file - because this Ajax call makes the language
+				 * get async to the remainder of this function we use bInitHandedOff to indicate that 
+				 * _fnInitialise will be fired by the returned Ajax handler, rather than the constructor
+				 */
+				oSettings.oLanguage.sUrl = oInit.oLanguage.sUrl;
+				$.getJSON( oSettings.oLanguage.sUrl, null, function( json ) {
+					_fnLanguageCompat( json );
+					$.extend( true, oSettings.oLanguage, oInit.oLanguage, json );
+					_fnInitialise( oSettings );
+				} );
+				bInitHandedOff = true;
+			}
+			else
+			{
+				$.extend( true, oSettings.oLanguage, oInit.oLanguage );
+			}
+			
+			
+			/*
+			 * Stripes
+			 */
+			if ( oInit.asStripeClasses === null )
+			{
+				oSettings.asStripeClasses =[
+					oSettings.oClasses.sStripeOdd,
+					oSettings.oClasses.sStripeEven
+				];
+			}
+			
+			/* Remove row stripe classes if they are already on the table row */
+			iLen=oSettings.asStripeClasses.length;
+			oSettings.asDestroyStripes = [];
+			if (iLen)
+			{
+				var bStripeRemove = false;
+				var anRows = $(this).children('tbody').children('tr:lt(' + iLen + ')');
+				for ( i=0 ; i<iLen ; i++ )
+				{
+					if ( anRows.hasClass( oSettings.asStripeClasses[i] ) )
+					{
+						bStripeRemove = true;
+						
+						/* Store the classes which we are about to remove so they can be re-added on destroy */
+						oSettings.asDestroyStripes.push( oSettings.asStripeClasses[i] );
+					}
+				}
+				
+				if ( bStripeRemove )
+				{
+					anRows.removeClass( oSettings.asStripeClasses.join(' ') );
+				}
+			}
+			
+			/*
+			 * Columns
+			 * See if we should load columns automatically or use defined ones
+			 */
+			var anThs = [];
+			var aoColumnsInit;
+			var nThead = this.getElementsByTagName('thead');
+			if ( nThead.length !== 0 )
+			{
+				_fnDetectHeader( oSettings.aoHeader, nThead[0] );
+				anThs = _fnGetUniqueThs( oSettings );
+			}
+			
+			/* If not given a column array, generate one with nulls */
+			if ( oInit.aoColumns === null )
+			{
+				aoColumnsInit = [];
+				for ( i=0, iLen=anThs.length ; i<iLen ; i++ )
+				{
+					aoColumnsInit.push( null );
+				}
+			}
+			else
+			{
+				aoColumnsInit = oInit.aoColumns;
+			}
+			
+			/* Add the columns */
+			for ( i=0, iLen=aoColumnsInit.length ; i<iLen ; i++ )
+			{
+				/* Short cut - use the loop to check if we have column visibility state to restore */
+				if ( oInit.saved_aoColumns !== undefined && oInit.saved_aoColumns.length == iLen )
+				{
+					if ( aoColumnsInit[i] === null )
+					{
+						aoColumnsInit[i] = {};
+					}
+					aoColumnsInit[i].bVisible = oInit.saved_aoColumns[i].bVisible;
+				}
+				
+				_fnAddColumn( oSettings, anThs ? anThs[i] : null );
+			}
+			
+			/* Apply the column definitions */
+			_fnApplyColumnDefs( oSettings, oInit.aoColumnDefs, aoColumnsInit, function (iCol, oDef) {
+				_fnColumnOptions( oSettings, iCol, oDef );
+			} );
+			
+			
+			/*
+			 * Sorting
+			 * Check the aaSorting array
+			 */
+			for ( i=0, iLen=oSettings.aaSorting.length ; i<iLen ; i++ )
+			{
+				if ( oSettings.aaSorting[i][0] >= oSettings.aoColumns.length )
+				{
+					oSettings.aaSorting[i][0] = 0;
+				}
+				var oColumn = oSettings.aoColumns[ oSettings.aaSorting[i][0] ];
+				
+				/* Add a default sorting index */
+				if ( oSettings.aaSorting[i][2] === undefined )
+				{
+					oSettings.aaSorting[i][2] = 0;
+				}
+				
+				/* If aaSorting is not defined, then we use the first indicator in asSorting */
+				if ( oInit.aaSorting === undefined && oSettings.saved_aaSorting === undefined )
+				{
+					oSettings.aaSorting[i][1] = oColumn.asSorting[0];
+				}
+				
+				/* Set the current sorting index based on aoColumns.asSorting */
+				for ( j=0, jLen=oColumn.asSorting.length ; j<jLen ; j++ )
+				{
+					if ( oSettings.aaSorting[i][1] == oColumn.asSorting[j] )
+					{
+						oSettings.aaSorting[i][2] = j;
+						break;
+					}
+				}
+			}
+				
+			/* Do a first pass on the sorting classes (allows any size changes to be taken into
+			 * account, and also will apply sorting disabled classes if disabled
+			 */
+			_fnSortingClasses( oSettings );
+			
+			
+			/*
+			 * Final init
+			 * Cache the header, body and footer as required, creating them if needed
+			 */
+			
+			/* Browser support detection */
+			_fnBrowserDetect( oSettings );
+			
+			// Work around for Webkit bug 83867 - store the caption-side before removing from doc
+			var captions = $(this).children('caption').each( function () {
+				this._captionSide = $(this).css('caption-side');
+			} );
+			
+			var thead = $(this).children('thead');
+			if ( thead.length === 0 )
+			{
+				thead = [ document.createElement( 'thead' ) ];
+				this.appendChild( thead[0] );
+			}
+			oSettings.nTHead = thead[0];
+			
+			var tbody = $(this).children('tbody');
+			if ( tbody.length === 0 )
+			{
+				tbody = [ document.createElement( 'tbody' ) ];
+				this.appendChild( tbody[0] );
+			}
+			oSettings.nTBody = tbody[0];
+			oSettings.nTBody.setAttribute( "role", "alert" );
+			oSettings.nTBody.setAttribute( "aria-live", "polite" );
+			oSettings.nTBody.setAttribute( "aria-relevant", "all" );
+			
+			var tfoot = $(this).children('tfoot');
+			if ( tfoot.length === 0 && captions.length > 0 && (oSettings.oScroll.sX !== "" || oSettings.oScroll.sY !== "") )
+			{
+				// If we are a scrolling table, and no footer has been given, then we need to create
+				// a tfoot element for the caption element to be appended to
+				tfoot = [ document.createElement( 'tfoot' ) ];
+				this.appendChild( tfoot[0] );
+			}
+			
+			if ( tfoot.length > 0 )
+			{
+				oSettings.nTFoot = tfoot[0];
+				_fnDetectHeader( oSettings.aoFooter, oSettings.nTFoot );
+			}
+			
+			/* Check if there is data passing into the constructor */
+			if ( bUsePassedData )
+			{
+				for ( i=0 ; i<oInit.aaData.length ; i++ )
+				{
+					_fnAddData( oSettings, oInit.aaData[ i ] );
+				}
+			}
+			else
+			{
+				/* Grab the data from the page */
+				_fnGatherData( oSettings );
+			}
+			
+			/* Copy the data index array */
+			oSettings.aiDisplay = oSettings.aiDisplayMaster.slice();
+			
+			/* Initialisation complete - table can be drawn */
+			oSettings.bInitialised = true;
+			
+			/* Check if we need to initialise the table (it might not have been handed off to the
+			 * language processor)
+			 */
+			if ( bInitHandedOff === false )
+			{
+				_fnInitialise( oSettings );
+			}
+		} );
+		_that = null;
+		return this;
+	};
+
+	
+	
+	/**
+	 * Provide a common method for plug-ins to check the version of DataTables being used, in order
+	 * to ensure compatibility.
+	 *  @param {string} sVersion Version string to check for, in the format "X.Y.Z". Note that the
+	 *    formats "X" and "X.Y" are also acceptable.
+	 *  @returns {boolean} true if this version of DataTables is greater or equal to the required
+	 *    version, or false if this version of DataTales is not suitable
+	 *  @static
+	 *  @dtopt API-Static
+	 *
+	 *  @example
+	 *    alert( $.fn.dataTable.fnVersionCheck( '1.9.0' ) );
+	 */
+	DataTable.fnVersionCheck = function( sVersion )
+	{
+		/* This is cheap, but effective */
+		var fnZPad = function (Zpad, count)
+		{
+			while(Zpad.length < count) {
+				Zpad += '0';
+			}
+			return Zpad;
+		};
+		var aThis = DataTable.ext.sVersion.split('.');
+		var aThat = sVersion.split('.');
+		var sThis = '', sThat = '';
+		
+		for ( var i=0, iLen=aThat.length ; i<iLen ; i++ )
+		{
+			sThis += fnZPad( aThis[i], 3 );
+			sThat += fnZPad( aThat[i], 3 );
+		}
+		
+		return parseInt(sThis, 10) >= parseInt(sThat, 10);
+	};
+	
+	
+	/**
+	 * Check if a TABLE node is a DataTable table already or not.
+	 *  @param {node} nTable The TABLE node to check if it is a DataTable or not (note that other
+	 *    node types can be passed in, but will always return false).
+	 *  @returns {boolean} true the table given is a DataTable, or false otherwise
+	 *  @static
+	 *  @dtopt API-Static
+	 *
+	 *  @example
+	 *    var ex = document.getElementById('example');
+	 *    if ( ! $.fn.DataTable.fnIsDataTable( ex ) ) {
+	 *      $(ex).dataTable();
+	 *    }
+	 */
+	DataTable.fnIsDataTable = function ( nTable )
+	{
+		var o = DataTable.settings;
+	
+		for ( var i=0 ; i<o.length ; i++ )
+		{
+			if ( o[i].nTable === nTable || o[i].nScrollHead === nTable || o[i].nScrollFoot === nTable )
+			{
+				return true;
+			}
+		}
+	
+		return false;
+	};
+	
+	
+	/**
+	 * Get all DataTable tables that have been initialised - optionally you can select to
+	 * get only currently visible tables.
+	 *  @param {boolean} [bVisible=false] Flag to indicate if you want all (default) or 
+	 *    visible tables only.
+	 *  @returns {array} Array of TABLE nodes (not DataTable instances) which are DataTables
+	 *  @static
+	 *  @dtopt API-Static
+	 *
+	 *  @example
+	 *    var table = $.fn.dataTable.fnTables(true);
+	 *    if ( table.length > 0 ) {
+	 *      $(table).dataTable().fnAdjustColumnSizing();
+	 *    }
+	 */
+	DataTable.fnTables = function ( bVisible )
+	{
+		var out = [];
+	
+		jQuery.each( DataTable.settings, function (i, o) {
+			if ( !bVisible || (bVisible === true && $(o.nTable).is(':visible')) )
+			{
+				out.push( o.nTable );
+			}
+		} );
+	
+		return out;
+	};
+	
+
+	/**
+	 * Version string for plug-ins to check compatibility. Allowed format is
+	 * a.b.c.d.e where: a:int, b:int, c:int, d:string(dev|beta), e:int. d and
+	 * e are optional
+	 *  @member
+	 *  @type string
+	 *  @default Version number
+	 */
+	DataTable.version = "1.9.4";
+
+	/**
+	 * Private data store, containing all of the settings objects that are created for the
+	 * tables on a given page.
+	 * 
+	 * Note that the <i>DataTable.settings</i> object is aliased to <i>jQuery.fn.dataTableExt</i> 
+	 * through which it may be accessed and manipulated, or <i>jQuery.fn.dataTable.settings</i>.
+	 *  @member
+	 *  @type array
+	 *  @default []
+	 *  @private
+	 */
+	DataTable.settings = [];
+
+	/**
+	 * Object models container, for the various models that DataTables has available
+	 * to it. These models define the objects that are used to hold the active state 
+	 * and configuration of the table.
+	 *  @namespace
+	 */
+	DataTable.models = {};
+	
+	
+	/**
+	 * DataTables extension options and plug-ins. This namespace acts as a collection "area"
+	 * for plug-ins that can be used to extend the default DataTables behaviour - indeed many
+	 * of the build in methods use this method to provide their own capabilities (sorting methods
+	 * for example).
+	 * 
+	 * Note that this namespace is aliased to jQuery.fn.dataTableExt so it can be readily accessed
+	 * and modified by plug-ins.
+	 *  @namespace
+	 */
+	DataTable.models.ext = {
+		/**
+		 * Plug-in filtering functions - this method of filtering is complimentary to the default
+		 * type based filtering, and a lot more comprehensive as it allows you complete control
+		 * over the filtering logic. Each element in this array is a function (parameters
+		 * described below) that is called for every row in the table, and your logic decides if
+		 * it should be included in the filtered data set or not.
+		 *   <ul>
+		 *     <li>
+		 *       Function input parameters:
+		 *       <ul>
+		 *         <li>{object} DataTables settings object: see {@link DataTable.models.oSettings}.</li>
+		 *         <li>{array|object} Data for the row to be processed (same as the original format
+		 *           that was passed in as the data source, or an array from a DOM data source</li>
+		 *         <li>{int} Row index in aoData ({@link DataTable.models.oSettings.aoData}), which can
+		 *           be useful to retrieve the TR element if you need DOM interaction.</li>
+		 *       </ul>
+		 *     </li>
+		 *     <li>
+		 *       Function return:
+		 *       <ul>
+		 *         <li>{boolean} Include the row in the filtered result set (true) or not (false)</li>
+		 *       </ul>
+		 *     </il>
+		 *   </ul>
+		 *  @type array
+		 *  @default []
+		 *
+		 *  @example
+		 *    // The following example shows custom filtering being applied to the fourth column (i.e.
+		 *    // the aData[3] index) based on two input values from the end-user, matching the data in 
+		 *    // a certain range.
+		 *    $.fn.dataTableExt.afnFiltering.push(
+		 *      function( oSettings, aData, iDataIndex ) {
+		 *        var iMin = document.getElementById('min').value * 1;
+		 *        var iMax = document.getElementById('max').value * 1;
+		 *        var iVersion = aData[3] == "-" ? 0 : aData[3]*1;
+		 *        if ( iMin == "" && iMax == "" ) {
+		 *          return true;
+		 *        }
+		 *        else if ( iMin == "" && iVersion < iMax ) {
+		 *          return true;
+		 *        }
+		 *        else if ( iMin < iVersion && "" == iMax ) {
+		 *          return true;
+		 *        }
+		 *        else if ( iMin < iVersion && iVersion < iMax ) {
+		 *          return true;
+		 *        }
+		 *        return false;
+		 *      }
+		 *    );
+		 */
+		"afnFiltering": [],
+	
+	
+		/**
+		 * Plug-in sorting functions - this method of sorting is complimentary to the default type
+		 * based sorting that DataTables does automatically, allowing much greater control over the
+		 * the data that is being used to sort a column. This is useful if you want to do sorting
+		 * based on live data (for example the contents of an 'input' element) rather than just the
+		 * static string that DataTables knows of. The way these plug-ins work is that you create
+		 * an array of the values you wish to be sorted for the column in question and then return
+		 * that array. Which pre-sorting function is run here depends on the sSortDataType parameter
+		 * that is used for the column (if any). This is the corollary of <i>ofnSearch</i> for sort 
+		 * data.
+		 *   <ul>
+	     *     <li>
+	     *       Function input parameters:
+	     *       <ul>
+		 *         <li>{object} DataTables settings object: see {@link DataTable.models.oSettings}.</li>
+	     *         <li>{int} Target column index</li>
+	     *       </ul>
+	     *     </li>
+		 *     <li>
+		 *       Function return:
+		 *       <ul>
+		 *         <li>{array} Data for the column to be sorted upon</li>
+		 *       </ul>
+		 *     </il>
+		 *   </ul>
+		 *  
+		 * Note that as of v1.9, it is typically preferable to use <i>mData</i> to prepare data for
+		 * the different uses that DataTables can put the data to. Specifically <i>mData</i> when
+		 * used as a function will give you a 'type' (sorting, filtering etc) that you can use to 
+		 * prepare the data as required for the different types. As such, this method is deprecated.
+		 *  @type array
+		 *  @default []
+		 *  @deprecated
+		 *
+		 *  @example
+		 *    // Updating the cached sorting information with user entered values in HTML input elements
+		 *    jQuery.fn.dataTableExt.afnSortData['dom-text'] = function ( oSettings, iColumn )
+		 *    {
+		 *      var aData = [];
+		 *      $( 'td:eq('+iColumn+') input', oSettings.oApi._fnGetTrNodes(oSettings) ).each( function () {
+		 *        aData.push( this.value );
+		 *      } );
+		 *      return aData;
+		 *    }
+		 */
+		"afnSortData": [],
+	
+	
+		/**
+		 * Feature plug-ins - This is an array of objects which describe the feature plug-ins that are
+		 * available to DataTables. These feature plug-ins are accessible through the sDom initialisation
+		 * option. As such, each feature plug-in must describe a function that is used to initialise
+		 * itself (fnInit), a character so the feature can be enabled by sDom (cFeature) and the name
+		 * of the feature (sFeature). Thus the objects attached to this method must provide:
+		 *   <ul>
+		 *     <li>{function} fnInit Initialisation of the plug-in
+		 *       <ul>
+	     *         <li>
+	     *           Function input parameters:
+	     *           <ul>
+		 *             <li>{object} DataTables settings object: see {@link DataTable.models.oSettings}.</li>
+	     *           </ul>
+	     *         </li>
+		 *         <li>
+		 *           Function return:
+		 *           <ul>
+		 *             <li>{node|null} The element which contains your feature. Note that the return
+		 *                may also be void if your plug-in does not require to inject any DOM elements 
+		 *                into DataTables control (sDom) - for example this might be useful when 
+		 *                developing a plug-in which allows table control via keyboard entry.</li>
+		 *           </ul>
+		 *         </il>
+		 *       </ul>
+		 *     </li>
+		 *     <li>{character} cFeature Character that will be matched in sDom - case sensitive</li>
+		 *     <li>{string} sFeature Feature name</li>
+		 *   </ul>
+		 *  @type array
+		 *  @default []
+		 * 
+		 *  @example
+		 *    // How TableTools initialises itself.
+		 *    $.fn.dataTableExt.aoFeatures.push( {
+		 *      "fnInit": function( oSettings ) {
+		 *        return new TableTools( { "oDTSettings": oSettings } );
+		 *      },
+		 *      "cFeature": "T",
+		 *      "sFeature": "TableTools"
+		 *    } );
+		 */
+		"aoFeatures": [],
+	
+	
+		/**
+		 * Type detection plug-in functions - DataTables utilises types to define how sorting and
+		 * filtering behave, and types can be either  be defined by the developer (sType for the
+		 * column) or they can be automatically detected by the methods in this array. The functions
+		 * defined in the array are quite simple, taking a single parameter (the data to analyse) 
+		 * and returning the type if it is a known type, or null otherwise.
+		 *   <ul>
+	     *     <li>
+	     *       Function input parameters:
+	     *       <ul>
+		 *         <li>{*} Data from the column cell to be analysed</li>
+	     *       </ul>
+	     *     </li>
+		 *     <li>
+		 *       Function return:
+		 *       <ul>
+		 *         <li>{string|null} Data type detected, or null if unknown (and thus pass it
+		 *           on to the other type detection functions.</li>
+		 *       </ul>
+		 *     </il>
+		 *   </ul>
+		 *  @type array
+		 *  @default []
+		 *  
+		 *  @example
+		 *    // Currency type detection plug-in:
+		 *    jQuery.fn.dataTableExt.aTypes.push(
+		 *      function ( sData ) {
+		 *        var sValidChars = "0123456789.-";
+		 *        var Char;
+		 *        
+		 *        // Check the numeric part
+		 *        for ( i=1 ; i<sData.length ; i++ ) {
+		 *          Char = sData.charAt(i); 
+		 *          if (sValidChars.indexOf(Char) == -1) {
+		 *            return null;
+		 *          }
+		 *        }
+		 *        
+		 *        // Check prefixed by currency
+		 *        if ( sData.charAt(0) == '$' || sData.charAt(0) == '&pound;' ) {
+		 *          return 'currency';
+		 *        }
+		 *        return null;
+		 *      }
+		 *    );
+		 */
+		"aTypes": [],
+	
+	
+		/**
+		 * Provide a common method for plug-ins to check the version of DataTables being used, 
+		 * in order to ensure compatibility.
+		 *  @type function
+		 *  @param {string} sVersion Version string to check for, in the format "X.Y.Z". Note 
+		 *    that the formats "X" and "X.Y" are also acceptable.
+		 *  @returns {boolean} true if this version of DataTables is greater or equal to the 
+		 *    required version, or false if this version of DataTales is not suitable
+		 *
+		 *  @example
+		 *    $(document).ready(function() {
+		 *      var oTable = $('#example').dataTable();
+		 *      alert( oTable.fnVersionCheck( '1.9.0' ) );
+		 *    } );
+		 */
+		"fnVersionCheck": DataTable.fnVersionCheck,
+	
+	
+		/**
+		 * Index for what 'this' index API functions should use
+		 *  @type int
+		 *  @default 0
+		 */
+		"iApiIndex": 0,
+	
+	
+		/**
+		 * Pre-processing of filtering data plug-ins - When you assign the sType for a column
+		 * (or have it automatically detected for you by DataTables or a type detection plug-in), 
+		 * you will typically be using this for custom sorting, but it can also be used to provide 
+		 * custom filtering by allowing you to pre-processing the data and returning the data in
+		 * the format that should be filtered upon. This is done by adding functions this object 
+		 * with a parameter name which matches the sType for that target column. This is the
+		 * corollary of <i>afnSortData</i> for filtering data.
+		 *   <ul>
+	     *     <li>
+	     *       Function input parameters:
+	     *       <ul>
+		 *         <li>{*} Data from the column cell to be prepared for filtering</li>
+	     *       </ul>
+	     *     </li>
+		 *     <li>
+		 *       Function return:
+		 *       <ul>
+		 *         <li>{string|null} Formatted string that will be used for the filtering.</li>
+		 *       </ul>
+		 *     </il>
+		 *   </ul>
+		 * 
+		 * Note that as of v1.9, it is typically preferable to use <i>mData</i> to prepare data for
+		 * the different uses that DataTables can put the data to. Specifically <i>mData</i> when
+		 * used as a function will give you a 'type' (sorting, filtering etc) that you can use to 
+		 * prepare the data as required for the different types. As such, this method is deprecated.
+		 *  @type object
+		 *  @default {}
+		 *  @deprecated
+		 *
+		 *  @example
+		 *    $.fn.dataTableExt.ofnSearch['title-numeric'] = function ( sData ) {
+		 *      return sData.replace(/\n/g," ").replace( /<.*?>/g, "" );
+		 *    }
+		 */
+		"ofnSearch": {},
+	
+	
+		/**
+		 * Container for all private functions in DataTables so they can be exposed externally
+		 *  @type object
+		 *  @default {}
+		 */
+		"oApi": {},
+	
+	
+		/**
+		 * Storage for the various classes that DataTables uses
+		 *  @type object
+		 *  @default {}
+		 */
+		"oStdClasses": {},
+		
+	
+		/**
+		 * Storage for the various classes that DataTables uses - jQuery UI suitable
+		 *  @type object
+		 *  @default {}
+		 */
+		"oJUIClasses": {},
+	
+	
+		/**
+		 * Pagination plug-in methods - The style and controls of the pagination can significantly 
+		 * impact on how the end user interacts with the data in your table, and DataTables allows 
+		 * the addition of pagination controls by extending this object, which can then be enabled
+		 * through the <i>sPaginationType</i> initialisation parameter. Each pagination type that
+		 * is added is an object (the property name of which is what <i>sPaginationType</i> refers
+		 * to) that has two properties, both methods that are used by DataTables to update the
+		 * control's state.
+		 *   <ul>
+		 *     <li>
+		 *       fnInit -  Initialisation of the paging controls. Called only during initialisation 
+		 *         of the table. It is expected that this function will add the required DOM elements 
+		 *         to the page for the paging controls to work. The element pointer 
+		 *         'oSettings.aanFeatures.p' array is provided by DataTables to contain the paging 
+		 *         controls (note that this is a 2D array to allow for multiple instances of each 
+		 *         DataTables DOM element). It is suggested that you add the controls to this element 
+		 *         as children
+		 *       <ul>
+	     *         <li>
+	     *           Function input parameters:
+	     *           <ul>
+		 *             <li>{object} DataTables settings object: see {@link DataTable.models.oSettings}.</li>
+		 *             <li>{node} Container into which the pagination controls must be inserted</li>
+		 *             <li>{function} Draw callback function - whenever the controls cause a page
+		 *               change, this method must be called to redraw the table.</li>
+	     *           </ul>
+	     *         </li>
+		 *         <li>
+		 *           Function return:
+		 *           <ul>
+		 *             <li>No return required</li>
+		 *           </ul>
+		 *         </il>
+		 *       </ul>
+		 *     </il>
+		 *     <li>
+		 *       fnInit -  This function is called whenever the paging status of the table changes and is
+		 *         typically used to update classes and/or text of the paging controls to reflex the new 
+		 *         status.
+		 *       <ul>
+	     *         <li>
+	     *           Function input parameters:
+	     *           <ul>
+		 *             <li>{object} DataTables settings object: see {@link DataTable.models.oSettings}.</li>
+		 *             <li>{function} Draw callback function - in case you need to redraw the table again
+		 *               or attach new event listeners</li>
+	     *           </ul>
+	     *         </li>
+		 *         <li>
+		 *           Function return:
+		 *           <ul>
+		 *             <li>No return required</li>
+		 *           </ul>
+		 *         </il>
+		 *       </ul>
+		 *     </il>
+		 *   </ul>
+		 *  @type object
+		 *  @default {}
+		 *
+		 *  @example
+		 *    $.fn.dataTableExt.oPagination.four_button = {
+		 *      "fnInit": function ( oSettings, nPaging, fnCallbackDraw ) {
+		 *        nFirst = document.createElement( 'span' );
+		 *        nPrevious = document.createElement( 'span' );
+		 *        nNext = document.createElement( 'span' );
+		 *        nLast = document.createElement( 'span' );
+		 *        
+		 *        nFirst.appendChild( document.createTextNode( oSettings.oLanguage.oPaginate.sFirst ) );
+		 *        nPrevious.appendChild( document.createTextNode( oSettings.oLanguage.oPaginate.sPrevious ) );
+		 *        nNext.appendChild( document.createTextNode( oSettings.oLanguage.oPaginate.sNext ) );
+		 *        nLast.appendChild( document.createTextNode( oSettings.oLanguage.oPaginate.sLast ) );
+		 *        
+		 *        nFirst.className = "paginate_button first";
+		 *        nPrevious.className = "paginate_button previous";
+		 *        nNext.className="paginate_button next";
+		 *        nLast.className = "paginate_button last";
+		 *        
+		 *        nPaging.appendChild( nFirst );
+		 *        nPaging.appendChild( nPrevious );
+		 *        nPaging.appendChild( nNext );
+		 *        nPaging.appendChild( nLast );
+		 *        
+		 *        $(nFirst).click( function () {
+		 *          oSettings.oApi._fnPageChange( oSettings, "first" );
+		 *          fnCallbackDraw( oSettings );
+		 *        } );
+		 *        
+		 *        $(nPrevious).click( function() {
+		 *          oSettings.oApi._fnPageChange( oSettings, "previous" );
+		 *          fnCallbackDraw( oSettings );
+		 *        } );
+		 *        
+		 *        $(nNext).click( function() {
+		 *          oSettings.oApi._fnPageChange( oSettings, "next" );
+		 *          fnCallbackDraw( oSettings );
+		 *        } );
+		 *        
+		 *        $(nLast).click( function() {
+		 *          oSettings.oApi._fnPageChange( oSettings, "last" );
+		 *          fnCallbackDraw( oSettings );
+		 *        } );
+		 *        
+		 *        $(nFirst).bind( 'selectstart', function () { return false; } );
+		 *        $(nPrevious).bind( 'selectstart', function () { return false; } );
+		 *        $(nNext).bind( 'selectstart', function () { return false; } );
+		 *        $(nLast)

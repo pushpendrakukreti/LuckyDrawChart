@@ -1,0 +1,39 @@
+<?php
+include_once 'config.php';
+
+class admin{
+
+//check user for login
+function slect_valid_user($table){
+$con=mysqli_connect('localhost','asn_company','admin@123','asn_company') or die(mysqli_error());
+$this->table_name=$table;
+$result=mysqli_query($con,"SELECT username,password FROM ".$this->table_name." WHERE username='$_POST[username]' AND password='$_POST[password]' ") or die(mysqli_error());
+if(mysqli_num_rows($result)>0){
+session_start();
+$_SESSION['user']="userlogging";
+header('location:dashboard.php');
+}
+else{
+echo "<script>alert('Username or password is not correct')</script>";
+}
+}
+
+//code to insert details
+function insert_details($table){
+$con=mysqli_connect('localhost','asn_company','admin@123','asn_company') or die(mysqli_error());
+$this->table_name=$table;
+
+$result=mysqli_query($con,"INSERT INTO ".$this->table_name."(heading,p_desc) 
+       value('$_POST[heading]','$_POST[pdesc]') ") or die(mysqli_error());
+		  
+				   if($result)
+				   return $msg="pass";
+				   else
+				   return $msg="fail";
+}
+
+//code to insert package more details
+function insert_pac_more_details($table,$ptype){
+$con=mysqli_connect('localhost','asn_company','admin@123','asn_company') or die(mysqli_error());
+$this->table_name=$table;
+$result=mysqli_query($con,"INSERT INTO ".$this->table_name."(pack_name,p_desc,pack_type) 
